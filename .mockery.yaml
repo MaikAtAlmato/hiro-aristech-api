@@ -1,0 +1,8 @@
+packages:
+  bitbucket.org/almatoag/hiro-aristech-api/internal/bardioc:
+    config:
+      dir: "internal/mocks"
+      filename: "bardioc_mocks.go"
+      pkgname: "mocks"
+    interfaces:
+      EdgeClient:

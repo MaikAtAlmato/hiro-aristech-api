@@ -1,0 +1,5 @@
+/hiro-aristech-api
+/coverage.out
+.env
+deployment/local.env
+docs/superpowers/
