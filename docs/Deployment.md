@@ -24,7 +24,7 @@ Weitere, seltener benötigte Bardioc-Tuning-Variablen (Connection-Pool-Größen,
 
 `API_KEY` und `JWT_SECRET` sollten zufällige, ausreichend lange Werte sein (z. B. GUID/UUID). Es gibt keine Rotation eingebaut — Wertänderung erfordert einen Neustart und Abstimmung mit Aristech (neuer `X-Api-Key` muss dort hinterlegt werden).
 
-## Weg 1: Direktes Binary-Deployment (aktuell produktiv genutzt)
+## Weg 1: Direktes Binary-Deployment
 
 Der Service läuft nativ (kein Docker) als systemd-Unit auf der Linux-VPS. Deployment über `deployment/deploy.ps1` (PowerShell, von Windows aus):
 
@@ -44,7 +44,7 @@ Feste Werte im Skript (bei Bedarf anpassen): VPS-Host, SSH-Key-Pfad, Remote-Verz
 
 ## Weg 2: Docker-Image
 
-Für den Fall, dass Aristech den Service selbst hosten soll (statt gegen die von euch betriebene VPS zu sprechen).
+Falls der Service auf eigener Infrastruktur betrieben werden soll.
 
 ### Voraussetzungen
 
