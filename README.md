@@ -54,5 +54,5 @@ internal/bardioc/  Graph-Repositories (Person/Ticket/Issue/Intent-Queries gegen 
 internal/identity/ Identitätsauflösung + Fuzzy-Name-Matching (Business-Logik)
 internal/config/   Env-basierte Konfiguration
 build/package/docker/  Dockerfile + exportierte Images
-docs/superpowers/  Design-/Plan-Dokumente vergangener Features (lokal, nicht getrackt)
+docs/ Dokumentation
 ```
