@@ -1,0 +1,278 @@
+{
+  "info": {
+    "_postman_id": "b7e2c8b0-6f1a-4e9a-9c3d-hiro-aristech-api",
+    "name": "hiro-aristech-api",
+    "description": "HTTP endpoints for hiro-aristech-api: caller authentication (including STT name-match pre-check), ticket lookup, AutomationIssue creation/status polling, and Intent catalog listing.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "issueId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authenticate by phone",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "    const body = pm.response.json();",
+              "    pm.collectionVariables.set('token', body.token);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth?phone=+491234567890",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "auth"],
+          "query": [
+            {
+              "key": "phone",
+              "value": "+491234567890"
+            },
+            {
+              "key": "name",
+              "value": "",
+              "disabled": true
+            },
+            {
+              "key": "domain",
+              "value": "almato.com",
+              "disabled": true
+            }
+          ]
+        },
+        "description": "Authenticate a caller by phone number. Returns a bearer token, the resolved caller name, and (when resolved) the caller's external Valuemation/MSGraph ID, used by GET /api/v1/tickets. When the caller resolved via MSGraph has a connected Account (msGraphConnector), also returns that Account's external ID and status. Optional 'domain' query param (comma-separated, e.g. 'almato.com' or 'almato.com,datagroup.com') restricts matching to callers whose email is on one of those domains, letting a name/phone search that would otherwise resolve to more than one person be narrowed to a single match. Saves the token to the {{token}} collection variable."
+      },
+      "response": []
+    },
+    {
+      "name": "Authenticate by name",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "    const body = pm.response.json();",
+              "    pm.collectionVariables.set('token', body.token);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth?name=Max Mustermann",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "auth"],
+          "query": [
+            {
+              "key": "name",
+              "value": "Max Mustermann"
+            },
+            {
+              "key": "phone",
+              "value": "",
+              "disabled": true
+            },
+            {
+              "key": "domain",
+              "value": "almato.com",
+              "disabled": true
+            }
+          ]
+        },
+        "description": "Authenticate a caller by full name. Returns a bearer token, the resolved caller name, and (when resolved) the caller's external Valuemation/MSGraph ID, used by GET /api/v1/tickets. When the caller resolved via MSGraph has a connected Account (msGraphConnector), also returns that Account's external ID and status. Optional 'domain' query param (comma-separated, e.g. 'almato.com' or 'almato.com,datagroup.com') restricts matching to callers whose email is on one of those domains, letting a name search that would otherwise resolve to more than one person (e.g. two different people named 'Paul Hoppe' at different companies) be narrowed to a single match. Saves the token to the {{token}} collection variable."
+      },
+      "response": []
+    },
+    {
+      "name": "Match caller name (STT pre-check)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": {\n    \"resultRaw\": \"Maik\",\n    \"resultNlp\": \"Maik\"\n  },\n  \"lastName\": {\n    \"resultRaw\": \"L\"\n  },\n  \"domain\": \"\",\n  \"tickerMessageId\": \"\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/auth/match",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "auth", "match"]
+        },
+        "description": "Pre-check endpoint the voicebot calls before GET /api/v1/auth?name=... when speech recognition of the caller's name may be incomplete (e.g. only an initial was recognized). Takes the raw Aristech STT recognition result for firstName/lastName (each up to resultType, resultRaw, resultTagged, resultSlotted, resultNlp, resultStructured, resultLanguage, confidence — only the fields that were actually populated need be sent) and searches the graph using whatever specificity is available, from a full name down to a single initial. If exact prefix matching finds nothing at all, a fuzzy fallback retries with edit-distance tolerance and returns any match at a reduced confidence (a stagePoints malus is applied) — treat any /auth/match candidate as needing re-confirmation before acting on identity (e.g. before returning ticket data or creating an issue under that identity), since a fuzzy-resolved candidate can still score close to an exact match. Returns candidates (up to 5, descending by confidence) instead of erroring on ambiguity like /auth does: each candidate has a 0-100 confidence plus a stagePoints/representationPoints/uniquenessPoints breakdown explaining it, and both a composed name and separate firstName/lastName so the caller can plug either straight into /auth?name=. Optional 'domain' field narrows matching the same way as /auth's domain param. 'tickerMessageId' is carried through for log correlation only. Returns 200 with an empty candidates list if nothing matched, 400 if neither name part had any usable recognition data, 503 on a graph lookup failure."
+      },
+      "response": []
+    },
+    {
+      "name": "Get caller tickets",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "X-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/tickets",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "tickets"]
+        },
+        "description": "Returns the authenticated caller's support tickets. Requires a bearer token obtained from GET /api/v1/auth."
+      },
+      "response": []
+    },
+    {
+      "name": "Create automation issue",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "    const body = pm.response.json();",
+              "    pm.collectionVariables.set('issueId', body.issueId);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"intentId\": \"\",\n  \"subject\": \"Drucker funktioniert nicht\",\n  \"originNode\": \"\",\n  \"scope\": \"\",\n  \"variables\": {\n    \"/userMail\": \"anrufer@example.com\",\n    \"/subject\": \"Drucker funktioniert nicht\",\n    \"/description\": \"Etagendrucker 2. OG druckt nicht mehr.\",\n    \"/urgency\": \"3 LOW\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/issues",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "issues"]
+        },
+        "description": "Creates an ogit/Automation/AutomationIssue that the Reasoning Engine picks up. If intentId is set, the Intent's fixed system variables (ogit/Automation/systemVariableNames/Values) are merged in first; variables always win on conflict. Without intentId, variables is used as the complete attribute set. originNode (ogit/Automation/originNode) and scope (ogit/_scope override; defaults to the connection's BARDIOC_SCOPE if omitted) are optional and take precedence over any same-keyed entry in variables. Requires a bearer token from GET /api/v1/auth. Saves the created issue's ID to the {{issueId}} collection variable."
+      },
+      "response": []
+    },
+    {
+      "name": "Get automation issue status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "X-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/issues/{{issueId}}/status",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "issues", "{{issueId}}", "status"]
+        },
+        "description": "Returns the current ogit/status (UNPROCESSED, PROCESSING, WAITING, RESOLVED, or STOPPED) of a previously created AutomationIssue. Poll this until RESOLVED/STOPPED. Requires a bearer token from GET /api/v1/auth."
+      },
+      "response": []
+    },
+    {
+      "name": "List intents",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "X-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/intents",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "intents"],
+          "query": [
+            {
+              "key": "intentType",
+              "value": "Mainintents",
+              "disabled": true
+            }
+          ]
+        },
+        "description": "Lists ogit/Automation/Intent graph nodes as raw vertices (every ogit/* and /-prefixed field passed through unfiltered). Optional 'intentType' query param (comma-separated, e.g. 'Mainintents' or 'Mainintents,Subintents') restricts results to Intent nodes whose /IntentType exactly matches (case-sensitive) one of the given values; omitted or empty returns every Intent. Requires a bearer token obtained from GET /api/v1/auth."
+      },
+      "response": []
+    }
+  ]
+}
