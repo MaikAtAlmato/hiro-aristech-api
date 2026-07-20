@@ -1,13 +1,6 @@
 // internal/identity/fuzzy.go
 package identity
 
-// minFuzzyNameLength is the shortest name part fuzzy matching will
-// attempt to correct. Shorter parts (e.g. a single initial) already get
-// full recall through the exact-prefix path, and edit-distance
-// correction on a 1-2 character string is too permissive to trust — e.g.
-// distance 1 from a single letter matches almost any other letter.
-const minFuzzyNameLength = 3
-
 // levenshtein returns the edit distance between a and b (insertions,
 // deletions, substitutions), operating on runes so multi-byte characters
 // (e.g. "ü") each count as one unit, not one per UTF-8 byte.
@@ -43,21 +36,6 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
-}
-
-// fuzzyThreshold returns the maximum edit distance still considered a
-// fuzzy match for a name of this length (rune count): round(len/4),
-// rounded half up, floored at 1. Short names tolerate 1 edit; longer
-// names tolerate proportionally more, so the tolerance scales with name
-// length instead of using one fixed number that would be too loose for
-// short names and too strict for long ones.
-func fuzzyThreshold(name string) int {
-	n := len([]rune(name))
-	t := int(float64(n)/4.0 + 0.5)
-	if t < 1 {
-		return 1
-	}
-	return t
 }
 
 // shortPrefix returns the first n runes of s, or all of s if it has fewer

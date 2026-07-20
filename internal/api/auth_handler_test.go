@@ -8,7 +8,6 @@ import (
 
 	"bitbucket.org/almatoag/bardioc-go/graph"
 	automation "bitbucket.org/almatoag/graph-go/NTO/Automation"
-	servicemanagement "bitbucket.org/almatoag/graph-go/NTO/ServiceManagement"
 	"bitbucket.org/almatoag/graph-go/SGO/sgo"
 	"bitbucket.org/almatoag/hiro-aristech-api/internal/auth"
 	"bitbucket.org/almatoag/hiro-aristech-api/internal/bardioc"
@@ -45,7 +44,15 @@ func (s stubValuemationFinder) FindByName(_ context.Context, firstName, lastName
 
 type stubTicketFinder struct{}
 
-func (stubTicketFinder) FindForPerson(_ context.Context, _ graph.MetadataID) ([]servicemanagement.Ticket, error) {
+func (stubTicketFinder) FindForPerson(_ context.Context, _ graph.MetadataID) ([]bardioc.Ticket, error) {
+	return nil, nil
+}
+
+func (stubTicketFinder) FindByID(_ context.Context, _ string) (*bardioc.Ticket, error) {
+	return nil, nil
+}
+
+func (stubTicketFinder) FindByIDForPerson(_ context.Context, _ string, _ graph.MetadataID) (*bardioc.Ticket, error) {
 	return nil, nil
 }
 
@@ -60,8 +67,8 @@ func (s stubAccountFinder) FindForPerson(_ context.Context, personID graph.Metad
 type stubIssueStore struct {
 	createdID          graph.MetadataID
 	createErr          error
-	status             string
-	statusErr          error
+	variables          map[string]any
+	variablesErr       error
 	capturedAttributes map[string]string
 }
 
@@ -70,8 +77,8 @@ func (s *stubIssueStore) Create(_ context.Context, attributes map[string]string)
 	return s.createdID, s.createErr
 }
 
-func (s stubIssueStore) Status(_ context.Context, _ graph.MetadataID) (string, error) {
-	return s.status, s.statusErr
+func (s stubIssueStore) Variables(_ context.Context, _ graph.MetadataID) (map[string]any, error) {
+	return s.variables, s.variablesErr
 }
 
 type stubIntentFinder struct {

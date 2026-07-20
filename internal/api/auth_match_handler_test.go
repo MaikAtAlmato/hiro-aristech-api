@@ -28,6 +28,13 @@ func (s stubMsgraphPrefixFinder) FindByNamePrefix(_ context.Context, firstNamePr
 	return s.byPrefix[firstNamePrefix+" "+lastNamePrefix], nil
 }
 
+func (s stubMsgraphPrefixFinder) FindByLastNameSuffix(_ context.Context, _ string, _ string) ([]sgo.Person, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return nil, nil
+}
+
 func newMatchTestServer(matcher *identity.Matcher) *Server {
 	resolver := &identity.Resolver{Msgraph: stubMsgraphFinder{}, Valuemation: stubValuemationFinder{}}
 	tokens := auth.NewTokenService("test-secret", 15*time.Minute)
@@ -42,7 +49,7 @@ func TestAuthMatchHandler_FullNameMatch_ReturnsHighConfidenceCandidate(t *testin
 		LastName:  "Lander",
 	}
 	matcher := &identity.Matcher{Msgraph: stubMsgraphPrefixFinder{byPrefix: map[string][]sgo.Person{
-		"Maik Lander": {maik},
+		"mai lan": {maik},
 	}}}
 	newMatchTestServer(matcher).Register(api)
 
@@ -95,4 +102,36 @@ func TestAuthMatchHandler_QueryFailure_Returns503(t *testing.T) {
 	}, "X-Api-Key: "+testAPIKey)
 
 	require.Equal(t, http.StatusServiceUnavailable, resp.Code)
+}
+
+func TestAuthMatchHandler_LastNameHint_ThreadsIntoMatchQuery(t *testing.T) {
+	_, api := humatest.New(t)
+	maik := sgo.Person{
+		Entity:    graph.Entity{Metadata: &graph.Metadata{ID: graph.MetadataID("ms-maik")}},
+		FirstName: "Maik",
+		LastName:  "Lander",
+	}
+	max := sgo.Person{
+		Entity:    graph.Entity{Metadata: &graph.Metadata{ID: graph.MetadataID("ms-max")}},
+		FirstName: "Max",
+		LastName:  "Lehmann",
+	}
+	matcher := &identity.Matcher{Msgraph: stubMsgraphPrefixFinder{byPrefix: map[string][]sgo.Person{
+		"m l": {maik, max},
+	}}}
+	newMatchTestServer(matcher).Register(api)
+
+	resp := api.Post("/api/v1/auth/match", map[string]any{
+		"firstName":    map[string]any{"resultRaw": "M"},
+		"lastName":     map[string]any{"resultRaw": "L"},
+		"lastNameHint": "Land",
+	}, "X-Api-Key: "+testAPIKey)
+
+	require.Equal(t, http.StatusOK, resp.Code)
+	// "Maik Lander" must be the first (index 0) candidate — proving the
+	// lastNameHint field bound correctly and boosted it above "Max Lehmann",
+	// which would otherwise narrowly lead (see
+	// TestMatcher_Match_LastNameHint_ReordersAmbiguousCandidates in
+	// internal/identity for the underlying arithmetic).
+	require.Contains(t, resp.Body.String(), `"candidates":[{"name":"Maik Lander"`)
 }

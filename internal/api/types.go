@@ -12,7 +12,9 @@ type AuthOutputBody struct {
 	Token                    string `json:"token" doc:"Bearer token to use on GET /api/v1/tickets"`
 	ExpiresIn                int    `json:"expiresIn" doc:"Token lifetime in seconds"`
 	Name                     string `json:"name" doc:"Resolved caller display name"`
-	ValuemationExternalID    string `json:"valuemationExternalId,omitempty" doc:"External ID of the resolved Valuemation person, present only if that source resolved"`
+	Email                    string `json:"email,omitempty" doc:"Email address of the resolved caller from Bardioc (MSGraph preferred, Valuemation fallback)"`
+	ValuemationPersonID      string `json:"valuemationPersonId,omitempty" doc:"Graph node ID (ogit/_id) of the resolved Valuemation person; pass as personId query param on ticket endpoints"`
+	ValuemationExternalID    string `json:"valuemationExternalId,omitempty" doc:"External ID (ogit/_xid) of the resolved Valuemation person, present only if that source resolved"`
 	MsgraphExternalID        string `json:"msgraphExternalId,omitempty" doc:"External ID of the resolved MSGraph person, present only if that source resolved"`
 	MsgraphAccountExternalID string `json:"msgraphAccountExternalId,omitempty" doc:"External ID of the Account connected to the resolved MSGraph person, present only if such an account exists"`
 	MsgraphAccountStatus     string `json:"msgraphAccountStatus,omitempty" doc:"Status of the Account connected to the resolved MSGraph person, present only if such an account exists"`
@@ -25,13 +27,22 @@ type AuthOutput struct {
 
 // TicketDTO is the subset of ticket data exposed to the voicebot.
 type TicketDTO struct {
-	ID          string `json:"id"`
-	Subject     string `json:"subject"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
-	Priority    string `json:"priority"`
-	CreatedAt   string `json:"createdAt"`
-	ClosedAt    string `json:"closedAt"`
+	ID           string `json:"id"`
+	XID          string `json:"xid,omitempty" doc:"External ID (ogit/_xid)"`
+	TicketID     string `json:"ticketId,omitempty" doc:"Valuemation ticket ID (ogit/ServiceManagement/ticketId)"`
+	Subject      string `json:"subject"`
+	Description  string `json:"description"`
+	Status       string `json:"status"`
+	SourceStatus string `json:"sourceStatus,omitempty" doc:"ogit/ServiceManagement/sourceStatus"`
+	Type         string `json:"type,omitempty" doc:"ogit/type"`
+	Class        string `json:"class,omitempty" doc:"ogit/class"`
+	Urgency      string `json:"urgency,omitempty" doc:"ogit/urgency"`
+	HLQ1Value    string `json:"hlq1Value,omitempty" doc:"/hlq1Value"`
+	DateFinished string `json:"dateFinished,omitempty" doc:"/dateFinished"`
+	KnownError   string `json:"knownError,omitempty" doc:"/knownerror"`
+	Priority     string `json:"priority"`
+	CreatedAt    string `json:"createdAt"`
+	ClosedAt     string `json:"closedAt"`
 }
 
 // TicketsInput is the header input for GET /api/v1/tickets.
@@ -47,6 +58,18 @@ type TicketsOutputBody struct {
 // TicketsOutput wraps TicketsOutputBody for huma.
 type TicketsOutput struct {
 	Body TicketsOutputBody
+}
+
+// TicketByIDInput is the header+path input for GET /api/v1/tickets/{id}.
+type TicketByIDInput struct {
+	Authorization string `header:"Authorization" doc:"Bearer <JWT>"`
+	ID            string `path:"id" doc:"Valuemation ticket ID (e.g. IN-3084747), ogit/ServiceManagement/ticketId value, or graph node ogit/_id"`
+	PersonID      string `query:"personId" required:"true" doc:"Valuemation Person XID for ownership check"`
+}
+
+// TicketByIDOutput wraps a single TicketDTO for huma.
+type TicketByIDOutput struct {
+	Body TicketDTO
 }
 
 // CreateIssueBody is the JSON body for POST /api/v1/issues.
@@ -82,7 +105,7 @@ type IssueStatusInput struct {
 
 // IssueStatusOutputBody is the JSON body returned by the status endpoint.
 type IssueStatusOutputBody struct {
-	Status string `json:"status" doc:"Current ogit/status: UNPROCESSED, PROCESSING, WAITING, RESOLVED, or STOPPED"`
+	Variables map[string]any `json:"variables" doc:"Every ogit/Automation/AutomationIssue variable (ogit/status, ogit/subject, and every other fixed or dynamic /-prefixed field), passed through unfiltered from the graph"`
 }
 
 // IssueStatusOutput wraps IssueStatusOutputBody for huma.
@@ -110,6 +133,7 @@ type NameMatchBody struct {
 	LastName        NameCandidate `json:"lastName"`
 	Domain          string        `json:"domain,omitempty" doc:"Comma-separated list of email domains to restrict matching to, same semantics as /auth's domain param"`
 	TickerMessageID string        `json:"tickerMessageId,omitempty" doc:"Aristech ticker message ID, carried through for log correlation only"`
+	LastNameHint    string        `json:"lastNameHint,omitempty" doc:"Optional disambiguation hint: first few letters of the last name, re-asked by the voicebot when the initial match was ambiguous or empty. Boosts matching candidates' confidence; never filters non-matching candidates out."`
 }
 
 // NameMatchInput is the body input for POST /api/v1/auth/match.
@@ -122,6 +146,8 @@ type NameMatchCandidateDTO struct {
 	Name                  string `json:"name"`
 	FirstName             string `json:"firstName"`
 	LastName              string `json:"lastName"`
+	FirstNamePhonetic     string `json:"firstNamePhonetic,omitempty" doc:"Kölner Phonetik code of the matched first name (variant B, ASCII-stripped)"`
+	LastNamePhonetic      string `json:"lastNamePhonetic,omitempty" doc:"Kölner Phonetik code of the matched last name (variant B, ASCII-stripped)"`
 	ValuemationExternalID string `json:"valuemationExternalId,omitempty"`
 	MsgraphExternalID     string `json:"msgraphExternalId,omitempty"`
 	Confidence            int    `json:"confidence" doc:"0-100 overall score"`

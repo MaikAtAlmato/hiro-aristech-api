@@ -42,21 +42,23 @@ func TestAutomationIssueRepository_Create_ReturnsNewIssueID(t *testing.T) {
 	require.Equal(t, graph.MetadataID("issue-1"), id)
 }
 
-func TestAutomationIssueRepository_Status_ReturnsCurrentStatus(t *testing.T) {
+func TestAutomationIssueRepository_Variables_ReturnsEveryField(t *testing.T) {
 	client := mocks.NewMockEdgeClient(t)
 	repo := NewAutomationIssueRepository(client)
 
 	issue := automation.AutomationIssue{}
 	issue.Metadata = &graph.Metadata{ID: graph.MetadataID("issue-1")}
 	issue.Status = "RESOLVED"
+	issue.Subject = "Drucker kaputt"
 
 	client.EXPECT().
 		GetEntity(mock.Anything, graph.MetadataID("issue-1"), mock.Anything).
 		Return(newSingleRow(issue)).
 		Once()
 
-	status, err := repo.Status(context.Background(), graph.MetadataID("issue-1"))
+	variables, err := repo.Variables(context.Background(), graph.MetadataID("issue-1"))
 
 	require.NoError(t, err)
-	require.Equal(t, "RESOLVED", status)
+	require.Equal(t, "RESOLVED", variables["ogit/status"])
+	require.Equal(t, "Drucker kaputt", variables["ogit/subject"])
 }

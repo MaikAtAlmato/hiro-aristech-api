@@ -74,7 +74,7 @@ func (s *Server) handleIssueStatus(ctx context.Context, input *IssueStatusInput)
 		return nil, err
 	}
 
-	status, err := s.issueRepo.Status(ctx, graph.MetadataID(input.IssueID))
+	variables, err := s.issueRepo.Variables(ctx, graph.MetadataID(input.IssueID))
 	switch {
 	case errors.Is(err, graph.ErrEntityNotFound):
 		return nil, huma.Error404NotFound("automation issue not found")
@@ -84,6 +84,6 @@ func (s *Server) handleIssueStatus(ctx context.Context, input *IssueStatusInput)
 	}
 
 	resp := &IssueStatusOutput{}
-	resp.Body.Status = status
+	resp.Body.Variables = variables
 	return resp, nil
 }

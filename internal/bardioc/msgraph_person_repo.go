@@ -106,3 +106,27 @@ func (r *MsgraphPersonRepository) FindByNamePrefix(ctx context.Context, firstNam
 	}
 	return persons, nil
 }
+
+// FindByLastNameSuffix returns every MSGraph Person whose first name starts
+// with firstNamePrefix and whose last name matches any single leading
+// character followed by lastNameSuffix (case-insensitive). Mirrors the
+// Valuemation equivalent.
+func (r *MsgraphPersonRepository) FindByLastNameSuffix(ctx context.Context, firstNamePrefix, lastNameSuffix string) ([]sgo.Person, error) {
+	b := esquery.NewBuilder().
+		Equal(graph.OgitType, "ogit/Person").And().
+		Equal("/pFlag", PFlagMsgraph).And().
+		Equal("ogit/firstName", esquery.NewRegex(namePrefixPattern(firstNamePrefix), esquery.WithIgnoreCase())).And().
+		Equal("ogit/lastName", esquery.NewRegex(lastNameSuffixPattern(lastNameSuffix), esquery.WithIgnoreCase()))
+
+	rows, err := r.client.QueryVertices(ctx, b, graph.WithListMeta(true), graph.WithIncludeDeleted(false))
+	if err != nil {
+		return nil, fmt.Errorf("query msgraph person by last-name suffix: %w", err)
+	}
+	defer rows.Close()
+
+	persons, err := graph.ScanRows[sgo.Person](rows)
+	if err != nil {
+		return nil, fmt.Errorf("scan msgraph person by last-name suffix: %w", err)
+	}
+	return persons, nil
+}

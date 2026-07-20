@@ -68,15 +68,17 @@ func (r *AutomationIssueRepository) Create(ctx context.Context, attributes map[s
 	return issue.Metadata.ID, nil
 }
 
-// Status returns the current ogit/status of the AutomationIssue with the
-// given ID (e.g. UNPROCESSED, PROCESSING, WAITING, RESOLVED, STOPPED).
-func (r *AutomationIssueRepository) Status(ctx context.Context, id graph.MetadataID) (string, error) {
+// Variables returns every variable of the AutomationIssue with the given
+// ID: fixed ogit/ fields (ogit/status, ogit/subject, ...) plus every
+// dynamic /-prefixed attribute set by the matched Intent, passed through
+// unfiltered from the graph.
+func (r *AutomationIssueRepository) Variables(ctx context.Context, id graph.MetadataID) (map[string]any, error) {
 	row := r.client.GetEntity(ctx, id, graph.WithIncludeDeleted(false))
 	defer row.Close()
 
-	var issue automation.AutomationIssue
-	if err := row.Scan(&issue); err != nil {
-		return "", fmt.Errorf("get automation issue %s: %w", id, err)
+	var variables map[string]any
+	if err := row.Scan(&variables); err != nil {
+		return nil, fmt.Errorf("get automation issue %s: %w", id, err)
 	}
-	return issue.Status, nil
+	return variables, nil
 }

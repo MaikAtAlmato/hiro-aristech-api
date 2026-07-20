@@ -1,6 +1,23 @@
 package bardioc
 
-import "bitbucket.org/almatoag/graph-go/SGO/sgo"
+import (
+	servicemanagement "bitbucket.org/almatoag/graph-go/NTO/ServiceManagement"
+	"bitbucket.org/almatoag/graph-go/SGO/sgo"
+)
+
+// Ticket extends servicemanagement.Ticket with Valuemation-specific custom
+// fields that are not part of the OGIT ontology (hence the "/" prefix).
+type Ticket struct {
+	servicemanagement.Ticket
+	HLQ1Value    string `json:"/hlq1Value,omitempty"`
+	DateFinished string `json:"/dateFinished,omitempty"`
+	KnownError   string `json:"/knownerror,omitempty"`
+}
+
+// OgitType delegates to the embedded Ticket so graph scanning works correctly.
+func (t Ticket) OgitType() string {
+	return t.Ticket.OgitType()
+}
 
 // ValuemationPerson mirrors the subset of hiro-conn-valuemation's Person
 // node this service needs to read. It cannot import that connector's

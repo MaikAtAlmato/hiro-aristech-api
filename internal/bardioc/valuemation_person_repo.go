@@ -35,6 +35,8 @@ func (r *ValuemationPersonRepository) FindByPhone(ctx context.Context, phone str
 		b := esquery.NewBuilder().
 			Equal(graph.OgitType, "ogit/Person").And().
 			Equal("/pFlag", PFlagValuemation).And().
+			Equal("/hlq1Value", "DG").And().
+			Equal("ogit/status", "ACTIVE").And().
 			Equal(field, phone)
 
 		rows, err := r.client.QueryVertices(ctx, b, graph.WithListMeta(true), graph.WithIncludeDeleted(false))
@@ -66,6 +68,8 @@ func (r *ValuemationPersonRepository) FindByName(ctx context.Context, firstName,
 	b := esquery.NewBuilder().
 		Equal(graph.OgitType, "ogit/Person").And().
 		Equal("/pFlag", PFlagValuemation).And().
+		Equal("/hlq1Value", "DG").And().
+		Equal("ogit/status", "ACTIVE").And().
 		Equal("ogit/firstName", firstName, esquery.WithIgnoreCase()).And().
 		Equal("ogit/lastName", lastName, esquery.WithIgnoreCase())
 
@@ -90,8 +94,23 @@ func (r *ValuemationPersonRepository) FindByNamePrefix(ctx context.Context, firs
 	b := esquery.NewBuilder().
 		Equal(graph.OgitType, "ogit/Person").And().
 		Equal("/pFlag", PFlagValuemation).And().
-		Equal("ogit/firstName", esquery.NewRegex(namePrefixPattern(firstNamePrefix), esquery.WithIgnoreCase())).And().
-		Equal("ogit/lastName", esquery.NewRegex(namePrefixPattern(lastNamePrefix), esquery.WithIgnoreCase()))
+		Equal("/hlq1Value", "DG").And().
+		Equal("ogit/status", "ACTIVE").And().
+		Equal("ogit/firstName", esquery.NewRegex(namePrefixPattern(firstNamePrefix), esquery.WithIgnoreCase())).And()
+
+	variants := lastNamePrefixVariants(lastNamePrefix)
+	if len(variants) == 1 {
+		b = b.Equal("ogit/lastName", esquery.NewRegex(namePrefixPattern(variants[0]), esquery.WithIgnoreCase()))
+	} else {
+		b = b.OpenGroup()
+		for i, v := range variants {
+			if i > 0 {
+				b = b.Or()
+			}
+			b = b.Equal("ogit/lastName", esquery.NewRegex(namePrefixPattern(v), esquery.WithIgnoreCase()))
+		}
+		b = b.CloseGroup()
+	}
 
 	rows, err := r.client.QueryVertices(ctx, b, graph.WithListMeta(true), graph.WithIncludeDeleted(false))
 	if err != nil {
@@ -102,6 +121,33 @@ func (r *ValuemationPersonRepository) FindByNamePrefix(ctx context.Context, firs
 	persons, err := graph.ScanRows[ValuemationPerson](rows)
 	if err != nil {
 		return nil, fmt.Errorf("scan valuemation person by name prefix: %w", err)
+	}
+	return persons, nil
+}
+
+// FindByLastNameSuffix returns every Valuemation Person whose first name
+// starts with firstNamePrefix and whose last name matches any single leading
+// character followed by lastNameSuffix (case-insensitive). This catches STT
+// errors where only the first letter of the last name was mis-recognised
+// (e.g. querying "ellner" finds "Sellner" when STT said "Fellner").
+func (r *ValuemationPersonRepository) FindByLastNameSuffix(ctx context.Context, firstNamePrefix, lastNameSuffix string) ([]ValuemationPerson, error) {
+	b := esquery.NewBuilder().
+		Equal(graph.OgitType, "ogit/Person").And().
+		Equal("/pFlag", PFlagValuemation).And().
+		Equal("/hlq1Value", "DG").And().
+		Equal("ogit/status", "ACTIVE").And().
+		Equal("ogit/firstName", esquery.NewRegex(namePrefixPattern(firstNamePrefix), esquery.WithIgnoreCase())).And().
+		Equal("ogit/lastName", esquery.NewRegex(lastNameSuffixPattern(lastNameSuffix), esquery.WithIgnoreCase()))
+
+	rows, err := r.client.QueryVertices(ctx, b, graph.WithListMeta(true), graph.WithIncludeDeleted(false))
+	if err != nil {
+		return nil, fmt.Errorf("query valuemation person by last-name suffix: %w", err)
+	}
+	defer rows.Close()
+
+	persons, err := graph.ScanRows[ValuemationPerson](rows)
+	if err != nil {
+		return nil, fmt.Errorf("scan valuemation person by last-name suffix: %w", err)
 	}
 	return persons, nil
 }

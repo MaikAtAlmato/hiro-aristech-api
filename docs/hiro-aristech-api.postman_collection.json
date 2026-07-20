@@ -25,6 +25,11 @@
       "key": "apiKey",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "ticketId",
+      "value": "IN-3084747",
+      "type": "string"
     }
   ],
   "item": [
@@ -142,14 +147,14 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"firstName\": {\n    \"resultRaw\": \"Maik\",\n    \"resultNlp\": \"Maik\"\n  },\n  \"lastName\": {\n    \"resultRaw\": \"L\"\n  },\n  \"domain\": \"\",\n  \"tickerMessageId\": \"\"\n}"
+          "raw": "{\n  \"firstName\": {\n    \"resultRaw\": \"Maik\",\n    \"resultNlp\": \"Maik\"\n  },\n  \"lastName\": {\n    \"resultRaw\": \"L\"\n  },\n  \"domain\": \"\",\n  \"tickerMessageId\": \"\",\n  \"lastNameHint\": \"\"\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/api/v1/auth/match",
           "host": ["{{baseUrl}}"],
           "path": ["api", "v1", "auth", "match"]
         },
-        "description": "Pre-check endpoint the voicebot calls before GET /api/v1/auth?name=... when speech recognition of the caller's name may be incomplete (e.g. only an initial was recognized). Takes the raw Aristech STT recognition result for firstName/lastName (each up to resultType, resultRaw, resultTagged, resultSlotted, resultNlp, resultStructured, resultLanguage, confidence — only the fields that were actually populated need be sent) and searches the graph using whatever specificity is available, from a full name down to a single initial. If exact prefix matching finds nothing at all, a fuzzy fallback retries with edit-distance tolerance and returns any match at a reduced confidence (a stagePoints malus is applied) — treat any /auth/match candidate as needing re-confirmation before acting on identity (e.g. before returning ticket data or creating an issue under that identity), since a fuzzy-resolved candidate can still score close to an exact match. Returns candidates (up to 5, descending by confidence) instead of erroring on ambiguity like /auth does: each candidate has a 0-100 confidence plus a stagePoints/representationPoints/uniquenessPoints breakdown explaining it, and both a composed name and separate firstName/lastName so the caller can plug either straight into /auth?name=. Optional 'domain' field narrows matching the same way as /auth's domain param. 'tickerMessageId' is carried through for log correlation only. Returns 200 with an empty candidates list if nothing matched, 400 if neither name part had any usable recognition data, 503 on a graph lookup failure."
+        "description": "Pre-check endpoint the voicebot calls before GET /api/v1/auth?name=... when speech recognition of the caller's name may be incomplete (e.g. only an initial was recognized). Takes the raw Aristech STT recognition result for firstName/lastName (each up to resultType, resultRaw, resultTagged, resultSlotted, resultNlp, resultStructured, resultLanguage, confidence — only the fields that were actually populated need be sent) and searches the graph using whatever specificity is available, from a full name down to a single initial. Matching always runs a combined Kölner-Phonetik + fuzzy-edit-distance scoring pipeline (no separate fallback stage), and an approximate match can score up to the same confidence (100) as an exact one — treat any /auth/match candidate as needing re-confirmation before acting on identity (e.g. before returning ticket data or creating an issue under that identity), since an approximately-matched candidate can score identically to an exact match. Returns candidates (up to 5, descending by confidence) instead of erroring on ambiguity like /auth does: each candidate has a 0-100 confidence plus a stagePoints/representationPoints/uniquenessPoints breakdown explaining it, and both a composed name and separate firstName/lastName so the caller can plug either straight into /auth?name=. Optional 'domain' field narrows matching the same way as /auth's domain param. 'tickerMessageId' is carried through for log correlation only. Optional 'lastNameHint' (e.g. the first 4 letters of the last name, re-asked by the dialog on an ambiguous or empty result) boosts matching candidates' stagePoints without filtering non-matching ones out. Returns 200 with an empty candidates list if nothing matched, 400 if neither name part had any usable recognition data, 503 on a graph lookup failure."
       },
       "response": []
     },
@@ -173,6 +178,29 @@
           "path": ["api", "v1", "tickets"]
         },
         "description": "Returns the authenticated caller's support tickets. Requires a bearer token obtained from GET /api/v1/auth."
+      },
+      "response": []
+    },
+    {
+      "name": "Get ticket by ID",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          },
+          {
+            "key": "X-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/tickets/{{ticketId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "tickets", "{{ticketId}}"]
+        },
+        "description": "Returns a single ticket by Valuemation ticket ID (e.g. IN-3084747), ogit/ServiceManagement/ticketId value, or graph node ogit/_id. Returns 404 if the ticket is not found. Requires a bearer token from GET /api/v1/auth."
       },
       "response": []
     },
@@ -240,7 +268,7 @@
           "host": ["{{baseUrl}}"],
           "path": ["api", "v1", "issues", "{{issueId}}", "status"]
         },
-        "description": "Returns the current ogit/status (UNPROCESSED, PROCESSING, WAITING, RESOLVED, or STOPPED) of a previously created AutomationIssue. Poll this until RESOLVED/STOPPED. Requires a bearer token from GET /api/v1/auth."
+        "description": "Returns every variable of a previously created ogit/Automation/AutomationIssue (ogit/status, ogit/subject, and every other fixed or dynamic /-prefixed field), passed through unfiltered from the graph. ogit/status cycles through UNPROCESSED, PROCESSING, WAITING, RESOLVED, or STOPPED. Poll this until RESOLVED/STOPPED. Requires a bearer token from GET /api/v1/auth."
       },
       "response": []
     },

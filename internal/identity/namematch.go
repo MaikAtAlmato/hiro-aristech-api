@@ -1,3 +1,4 @@
+// internal/identity/namematch.go
 package identity
 
 import (
@@ -29,6 +30,12 @@ type NameMatchQuery struct {
 	FirstName STTResult
 	LastName  STTResult
 	Domains   []string
+	// LastNameHint is an optional caller-supplied prefix of the last name
+	// (e.g. its first 4 letters), re-asked by Aristech's own dialog logic
+	// when the initial match was ambiguous or empty. Boosts matching
+	// candidates' stagePoints (see hintMatches); never filters
+	// non-matching candidates out.
+	LastNameHint string
 }
 
 // NameMatchCandidate is one resolved person with its confidence breakdown,
@@ -37,6 +44,8 @@ type NameMatchCandidate struct {
 	Name                 string
 	FirstName            string
 	LastName             string
+	FirstNamePhonetic    string
+	LastNamePhonetic     string
 	ValuemationPersonXID string
 	MsgraphPersonXID     string
 	Confidence           int
@@ -148,26 +157,91 @@ func extractCandidates(q NameMatchQuery) []usableRepresentation {
 	return out
 }
 
-// specificity is how much of matchedName the candidate string specifies,
-// as a length ratio clamped to 1.0 (e.g. "M" against "Maik" is 0.25;
-// "Maik" against "Maik" is 1.0). Returns 0 if matchedName is empty.
-func specificity(candidate, matchedName string) float64 {
-	matchedLen := len([]rune(matchedName))
-	if matchedLen == 0 {
+// matchQuality returns a 0-1 score for how well sttText matches
+// storedName, combining fuzzy edit distance (checked across all four
+// combinations of the two normalization variants — see normalize) with a
+// Kölner Phonetik bonus. This is what feeds stagePoints below, replacing
+// the old pure length-ratio specificity check: it also rewards
+// phonetically-similar spellings (e.g. STT text "Meyer" against a stored
+// "Maier"), not just prefix completeness.
+func matchQuality(sttText, storedName string) float64 {
+	sttA, sttB := normalize(sttText)
+	nameA, nameB := normalize(storedName)
+
+	quality := bestFuzzyRatio(sttA, sttB, nameA, nameB)
+
+	if sttB != "" && nameB != "" && koelnerPhonetik(sttB) == koelnerPhonetik(nameB) {
+		quality += phoneticBonus
+	}
+
+	if quality > 1 {
+		quality = 1
+	}
+	if quality < 0 {
+		quality = 0
+	}
+	return quality
+}
+
+// phoneticBonus is added to matchQuality when two name parts' Kölner
+// Phonetik codes are equal.
+const phoneticBonus = 0.35
+
+// bestFuzzyRatio computes fuzzyRatio for all four combinations of
+// {sttA, sttB} × {nameA, nameB} and returns the highest ratio found.
+func bestFuzzyRatio(sttA, sttB, nameA, nameB string) float64 {
+	best := 0.0
+	for _, stt := range [2]string{sttA, sttB} {
+		for _, name := range [2]string{nameA, nameB} {
+			if r := fuzzyRatio(stt, name); r > best {
+				best = r
+			}
+		}
+	}
+	return best
+}
+
+// fuzzyRatio returns 1 - levenshtein(a,b)/maxLen(a,b), clamped to [0,1].
+// Returns 0 if both strings are empty (maxLen would be 0).
+func fuzzyRatio(a, b string) float64 {
+	maxLen := len([]rune(a))
+	if bl := len([]rune(b)); bl > maxLen {
+		maxLen = bl
+	}
+	if maxLen == 0 {
 		return 0
 	}
-	ratio := float64(len([]rune(candidate))) / float64(matchedLen)
-	if ratio > 1 {
-		ratio = 1
+	ratio := 1 - float64(levenshtein(a, b))/float64(maxLen)
+	if ratio < 0 {
+		ratio = 0
 	}
 	return ratio
 }
 
-// stagePoints scores how specific/complete a matched name was: 20 (both
-// initials) to 50 (both full names).
-func stagePoints(firstSpecificity, lastSpecificity float64) int {
-	stageScore := (firstSpecificity + lastSpecificity) / 2
-	return int(20 + 30*stageScore + 0.5) // round half up; inputs are always >= 0
+// hintMatches reports whether storedLastName's normalized form (variant A
+// or B) starts with hint's equally normalized form. Used only as a
+// stagePoints boost (see groupRecords), never as a filter. An empty hint
+// never matches.
+func hintMatches(hint, storedLastName string) bool {
+	if strings.TrimSpace(hint) == "" {
+		return false
+	}
+	hintA, hintB := normalize(hint)
+	nameA, nameB := normalize(storedLastName)
+	return (hintA != "" && strings.HasPrefix(nameA, hintA)) || (hintB != "" && strings.HasPrefix(nameB, hintB))
+}
+
+// lastNameHintBoost is added to a candidate's stagePoints when
+// hintMatches its stored last name.
+const lastNameHintBoost = 10
+
+// stagePoints scores how specific/complete a matched name was: 0 (no
+// similarity) to 50 (both full, well-matching names). Last name carries 65%
+// of the weight (first name 35%) — last names are more distinctive and STT
+// errors in first names (transpositions, similar sounds) are more forgivable.
+func stagePoints(firstQuality, lastQuality float64) int {
+	stageScore := firstQuality*0.35 + lastQuality*0.65
+	return int(50*stageScore + 0.5) // round half up; inputs are always >= 0
 }
 
 // representationPoints scores how many of the available STT
@@ -241,7 +315,7 @@ func recordsLinked(a, b personRecord) bool {
 
 // groupRepresentatives picks the best MSGraph and/or Valuemation record
 // from members (reusing the existing tie-break rules), for display and
-// specificity scoring.
+// scoring.
 func groupRepresentatives(members []personRecord) (msRep *sgo.Person, vmRep *bardioc.ValuemationPerson) {
 	var msMembers []sgo.Person
 	var vmMembers []bardioc.ValuemationPerson
@@ -265,7 +339,7 @@ func groupRepresentatives(members []personRecord) (msRep *sgo.Person, vmRep *bar
 }
 
 // personGroup is one distinct real person found by a single prefix query
-// (one representation type), with the specificity of the match that found
+// (one representation type), with the stagePoints of the match that found
 // them.
 type personGroup struct {
 	records     []personRecord
@@ -277,8 +351,10 @@ type personGroup struct {
 // groupRecords clusters records (all persons returned by one
 // representation type's prefix query, across both sources) into distinct
 // real people, scoring each group's stagePoints against its own best
-// representative's actual name.
-func groupRecords(records []personRecord, rtype representationType, firstCandidate, lastCandidate string) []personGroup {
+// representative's actual name. lastNameHint, if non-empty, boosts a
+// group's stagePoints when it matches (see hintMatches) — it never
+// filters groups out.
+func groupRecords(records []personRecord, rtype representationType, firstCandidate, lastCandidate, lastNameHint string) []personGroup {
 	linked := func(i, j int) bool { return recordsLinked(records[i], records[j]) }
 	clusters := clusterIndices(len(records), linked)
 
@@ -303,14 +379,35 @@ func groupRecords(records []personRecord, rtype representationType, firstCandida
 			ids[m.recordID()] = true
 		}
 
+		sp := stagePoints(matchQuality(firstCandidate, firstName), matchQuality(lastCandidate, lastName))
+		if hintMatches(lastNameHint, lastName) {
+			sp += lastNameHintBoost
+			if sp > 50 {
+				sp = 50
+			}
+		}
+
 		groups = append(groups, personGroup{
 			records:     members,
 			recordIDs:   ids,
-			stagePoints: stagePoints(specificity(firstCandidate, firstName), specificity(lastCandidate, lastName)),
+			stagePoints: sp,
 			repType:     rtype,
 		})
 	}
 	return groups
+}
+
+// topByStagePoints returns the n highest-stagePoints groups from groups,
+// sorted descending. If groups has n or fewer entries, all are returned
+// (still sorted).
+func topByStagePoints(groups []personGroup, n int) []personGroup {
+	sorted := make([]personGroup, len(groups))
+	copy(sorted, groups)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].stagePoints > sorted[j].stagePoints })
+	if len(sorted) > n {
+		sorted = sorted[:n]
+	}
+	return sorted
 }
 
 // finalCluster accumulates evidence for one distinct real person across
@@ -380,30 +477,6 @@ func mergeGroups(allGroups [][]personGroup) []*finalCluster {
 	return finals
 }
 
-// fuzzyStagePointsMalus is subtracted from a fuzzy-matched group's
-// stagePoints, so a candidate found only via edit-distance correction
-// always ranks below an exact prefix match of equivalent specificity.
-const fuzzyStagePointsMalus = 15
-
-// fuzzyStagePointsFloor mirrors stagePoints' documented minimum (see
-// stagePoints) — the malus never pushes a fuzzy match below it.
-const fuzzyStagePointsFloor = 20
-
-// applyFuzzyMalus returns groups with stagePoints reduced by
-// fuzzyStagePointsMalus, floored at fuzzyStagePointsFloor. Used only for
-// groups found via Match's fuzzy fallback, never for exact-prefix groups.
-func applyFuzzyMalus(groups []personGroup) []personGroup {
-	out := make([]personGroup, len(groups))
-	for i, g := range groups {
-		g.stagePoints -= fuzzyStagePointsMalus
-		if g.stagePoints < fuzzyStagePointsFloor {
-			g.stagePoints = fuzzyStagePointsFloor
-		}
-		out[i] = g
-	}
-	return out
-}
-
 // candidateFromCluster builds the final scored NameMatchCandidate for one
 // distinct person, given the representationPoints and uniquenessPoints
 // already computed for the whole match run.
@@ -422,10 +495,15 @@ func candidateFromCluster(fc *finalCluster, representationPts, uniquenessPts int
 		valuemationXID = externalID(vmRep.XID, vmRep.Metadata.ID)
 	}
 
+	_, firstB := normalize(firstName)
+	_, lastB := normalize(lastName)
+
 	return NameMatchCandidate{
 		Name:                 strings.TrimSpace(firstName + " " + lastName),
 		FirstName:            firstName,
 		LastName:             lastName,
+		FirstNamePhonetic:    koelnerPhonetik(firstB),
+		LastNamePhonetic:     koelnerPhonetik(lastB),
 		ValuemationPersonXID: valuemationXID,
 		MsgraphPersonXID:     msgraphXID,
 		StagePoints:          fc.stagePoints,
@@ -443,11 +521,19 @@ var ErrNoNameData = errors.New("identity: no name recognition data supplied")
 // first and last name start with the given prefixes.
 type MsgraphPersonPrefixFinder interface {
 	FindByNamePrefix(ctx context.Context, firstNamePrefix, lastNamePrefix string) ([]sgo.Person, error)
+	// FindByLastNameSuffix finds persons whose first name starts with
+	// firstNamePrefix and whose last name matches any single leading character
+	// followed by lastNameSuffix. Used to catch first-letter STT errors.
+	FindByLastNameSuffix(ctx context.Context, firstNamePrefix, lastNameSuffix string) ([]sgo.Person, error)
 }
 
 // ValuemationPersonPrefixFinder is the Valuemation-side equivalent.
 type ValuemationPersonPrefixFinder interface {
 	FindByNamePrefix(ctx context.Context, firstNamePrefix, lastNamePrefix string) ([]bardioc.ValuemationPerson, error)
+	// FindByLastNameSuffix finds persons whose first name starts with
+	// firstNamePrefix and whose last name matches any single leading character
+	// followed by lastNameSuffix. Used to catch first-letter STT errors.
+	FindByLastNameSuffix(ctx context.Context, firstNamePrefix, lastNameSuffix string) ([]bardioc.ValuemationPerson, error)
 }
 
 // Matcher scores candidate persons for a possibly-incomplete STT name
@@ -488,50 +574,147 @@ func (m *Matcher) queryRecords(ctx context.Context, firstPrefix, lastPrefix stri
 	return records, nil
 }
 
-// fuzzyQueryRecords widens firstName/lastName to their first 3 runes and
-// re-runs queryRecords, then keeps only records whose actual name is
-// within fuzzyThreshold edit distance of the original (un-widened)
-// candidate strings on both name parts. Returns (nil, nil) without
-// querying anything if either name part is shorter than
-// minFuzzyNameLength.
-func (m *Matcher) fuzzyQueryRecords(ctx context.Context, firstName, lastName string, domains []string) ([]personRecord, error) {
-	if len([]rune(firstName)) < minFuzzyNameLength || len([]rune(lastName)) < minFuzzyNameLength {
-		return nil, nil
+// topCandidatesPerRepresentation caps how many scored candidates from a
+// single representation type's prefix query survive into the
+// cross-representation merge, keeping the merge step's cost bounded even
+// when a common 3-rune prefix matches many people.
+const topCandidatesPerRepresentation = 15
+
+// querySuffixRecords runs one suffix query per configured source: finds
+// persons whose first name starts with firstPrefix and whose last name
+// matches any single leading character followed by lastSuffix. This catches
+// STT errors where only the first letter of the last name was mis-recognised
+// (e.g. "Fellner" → suffix "ellner" also finds "Sellner").
+func (m *Matcher) querySuffixRecords(ctx context.Context, firstPrefix, lastSuffix string, domains []string) ([]personRecord, error) {
+	var records []personRecord
+
+	if m.Msgraph != nil {
+		msPersons, err := m.Msgraph.FindByLastNameSuffix(ctx, firstPrefix, lastSuffix)
+		if err != nil {
+			return nil, fmt.Errorf("msgraph last-name suffix lookup: %w", err)
+		}
+		for _, p := range filterMsgraphPersonsByDomain(msPersons, domains) {
+			records = append(records, personRecord{ms: &p})
+		}
 	}
 
-	widened, err := m.queryRecords(ctx, shortPrefix(firstName, 3), shortPrefix(lastName, 3), domains)
+	if m.Valuemation != nil {
+		vmPersons, err := m.Valuemation.FindByLastNameSuffix(ctx, firstPrefix, lastSuffix)
+		if err != nil {
+			return nil, fmt.Errorf("valuemation last-name suffix lookup: %w", err)
+		}
+		for _, p := range filterValuemationPersonsByDomain(vmPersons, domains) {
+			records = append(records, personRecord{vm: &p})
+		}
+	}
+
+	return records, nil
+}
+
+// queryRecordsByPrefix queries the graph using both of a name part's
+// normalized variants' 3-rune prefixes, and unions the results by record
+// ID. Most names have no umlaut/ß, so variant A and B are identical and
+// only one query runs; when they differ (e.g. STT "Mueller" vs a stored
+// "Müller"), a second query with the other variant's prefix catches
+// records the first would have missed.
+//
+// Additionally, when the last name has 4+ runes, a suffix query runs:
+// the last name minus its first rune (e.g. "Fellner" → "ellner") is sent
+// as a wildcard-first-letter pattern, so "Sellner" is found even though F
+// and S are not phonetically equivalent.
+func (m *Matcher) queryRecordsByPrefix(ctx context.Context, firstName, lastName string, domains []string) ([]personRecord, error) {
+	firstA, firstB := normalize(firstName)
+	lastA, lastB := normalize(lastName)
+
+	records, err := m.queryRecords(ctx, shortPrefix(firstA, 3), shortPrefix(lastA, 3), domains)
 	if err != nil {
 		return nil, err
 	}
 
-	firstThreshold := fuzzyThreshold(firstName)
-	lastThreshold := fuzzyThreshold(lastName)
+	seen := map[string]bool{}
+	for _, r := range records {
+		seen[r.recordID()] = true
+	}
 
-	var filtered []personRecord
-	for _, r := range widened {
-		var recFirst, recLast string
-		switch {
-		case r.ms != nil:
-			recFirst, recLast = r.ms.FirstName, r.ms.LastName
-		case r.vm != nil:
-			recFirst, recLast = r.vm.FirstName, r.vm.LastName
+	// Second query for umlaut/ß normalization variants (e.g. STT "Mueller" vs stored "Müller")
+	if firstA != firstB || lastA != lastB {
+		moreRecords, err := m.queryRecords(ctx, shortPrefix(firstB, 3), shortPrefix(lastB, 3), domains)
+		if err != nil {
+			return nil, err
 		}
-		if levenshtein(firstName, recFirst) <= firstThreshold && levenshtein(lastName, recLast) <= lastThreshold {
-			filtered = append(filtered, r)
+		for _, r := range moreRecords {
+			if !seen[r.recordID()] {
+				seen[r.recordID()] = true
+				records = append(records, r)
+			}
 		}
 	}
-	return filtered, nil
+
+	// Suffix query: catches STT errors where the first letter of the last name
+	// is wrong. Only runs when the suffix is long enough (>= 3 runes) to avoid
+	// returning overly broad results.
+	if runes := []rune(lastA); len(runes) >= 4 {
+		suffixRecords, err := m.querySuffixRecords(ctx, shortPrefix(firstA, 3), string(runes[1:]), domains)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range suffixRecords {
+			if !seen[r.recordID()] {
+				seen[r.recordID()] = true
+				records = append(records, r)
+			}
+		}
+	}
+
+	// First-name alias queries: catches common spelling variants where the
+	// STT produced a different but equivalent spelling (e.g. "Mike"→"Maik").
+	// firstNameAliasPrefixes returns only prefixes that differ from firstA's
+	// own prefix, so this never duplicates the main query.
+	for _, aliasPrefix := range firstNameAliasPrefixes(firstA) {
+		aliasRecords, err := m.queryRecords(ctx, aliasPrefix, shortPrefix(lastA, 3), domains)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range aliasRecords {
+			if !seen[r.recordID()] {
+				seen[r.recordID()] = true
+				records = append(records, r)
+			}
+		}
+	}
+
+	// Last-name alias queries: catches common spelling variants of the last name
+	// (e.g. "Meyer"→"Maier"/"Mayer"/"Meier").
+	for _, aliasPrefix := range lastNameAliasPrefixes(lastA) {
+		aliasRecords, err := m.queryRecords(ctx, shortPrefix(firstA, 3), aliasPrefix, domains)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range aliasRecords {
+			if !seen[r.recordID()] {
+				seen[r.recordID()] = true
+				records = append(records, r)
+			}
+		}
+	}
+
+	return records, nil
 }
 
 // Match scores every distinct person found across all usable STT
 // representation types, returning up to 5 candidates sorted by descending
 // confidence. It returns ErrNoNameData if q has no usable data at all.
 //
-// If the exact-prefix search finds nothing at all, a fuzzy (edit-distance)
-// fallback retries with a widened prefix per candidate and applies a
-// malus to the resulting stagePoints — see fuzzyQueryRecords and
-// applyFuzzyMalus. The fallback never runs when the exact search already
-// found something.
+// For each usable representation, a prefix query (first 3 runes of each
+// name part) always runs — there is no separate exact-vs-fuzzy fallback
+// stage. Every returned candidate is scored by matchQuality (normalized
+// fuzzy edit distance plus a Kölner Phonetik bonus), optionally boosted
+// by q.LastNameHint, and the best topCandidatesPerRepresentation are kept
+// per representation before merging across representation types. When a
+// name part contains an umlaut or ß, both normalized variants' prefixes
+// are queried and unioned (see queryRecordsByPrefix), so a spelling
+// mismatch between STT output and the stored name doesn't prevent
+// retrieval.
 func (m *Matcher) Match(ctx context.Context, q NameMatchQuery) ([]NameMatchCandidate, error) {
 	candidates := extractCandidates(q)
 	if len(candidates) == 0 {
@@ -540,29 +723,33 @@ func (m *Matcher) Match(ctx context.Context, q NameMatchQuery) ([]NameMatchCandi
 
 	var allGroups [][]personGroup
 	for _, c := range candidates {
-		records, err := m.queryRecords(ctx, c.firstName, c.lastName, q.Domains)
+		records, err := m.queryRecordsByPrefix(ctx, c.firstName, c.lastName, q.Domains)
 		if err != nil {
 			return nil, err
 		}
-		allGroups = append(allGroups, groupRecords(records, c.rtype, c.firstName, c.lastName))
+		groups := groupRecords(records, c.rtype, c.firstName, c.lastName, q.LastNameHint)
+		allGroups = append(allGroups, topByStagePoints(groups, topCandidatesPerRepresentation))
 	}
 
 	finals := mergeGroups(allGroups)
-
-	if len(finals) == 0 {
-		var fuzzyGroups [][]personGroup
-		for _, c := range candidates {
-			records, err := m.fuzzyQueryRecords(ctx, c.firstName, c.lastName, q.Domains)
-			if err != nil {
-				return nil, err
-			}
-			fuzzyGroups = append(fuzzyGroups, applyFuzzyMalus(groupRecords(records, c.rtype, c.firstName, c.lastName)))
-		}
-		finals = mergeGroups(fuzzyGroups)
-	}
-
 	total := len(candidates)
-	uPoints := uniquenessPoints(len(finals))
+
+	// Uniqueness counts only candidates within 50% of the winner's stagePoints.
+	// Weak matches (e.g. a fuzzy hit with only partial phonetic similarity) don't
+	// reduce the winner's uniqueness score when the winner is clearly ahead.
+	maxSP := 0
+	for _, fc := range finals {
+		if fc.stagePoints > maxSP {
+			maxSP = fc.stagePoints
+		}
+	}
+	competitive := 0
+	for _, fc := range finals {
+		if fc.stagePoints*2 >= maxSP {
+			competitive++
+		}
+	}
+	uPoints := uniquenessPoints(competitive)
 
 	result := make([]NameMatchCandidate, 0, len(finals))
 	for _, fc := range finals {

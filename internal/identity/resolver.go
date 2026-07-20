@@ -39,6 +39,7 @@ type Identity struct {
 	ValuemationPersonXID string
 	MsgraphPersonXID     string
 	DisplayName          string
+	Email                string
 }
 
 // MsgraphPersonFinder looks up MSGraph-sourced Person nodes.
@@ -176,6 +177,7 @@ func identityFrom(ms *sgo.Person, vm *bardioc.ValuemationPerson) *Identity {
 		id.MsgraphPersonID = &msID
 		id.MsgraphPersonXID = externalID(ms.XID, msID)
 		id.DisplayName = strings.TrimSpace(ms.FirstName + " " + ms.LastName)
+		id.Email = ms.Email
 	}
 	if vm != nil {
 		vmID := vm.Metadata.ID
@@ -183,6 +185,9 @@ func identityFrom(ms *sgo.Person, vm *bardioc.ValuemationPerson) *Identity {
 		id.ValuemationPersonXID = externalID(vm.XID, vmID)
 		if id.DisplayName == "" {
 			id.DisplayName = strings.TrimSpace(vm.FirstName + " " + vm.LastName)
+		}
+		if id.Email == "" {
+			id.Email = vm.Email
 		}
 	}
 	return id

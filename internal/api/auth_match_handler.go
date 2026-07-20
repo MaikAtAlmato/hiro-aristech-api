@@ -16,12 +16,14 @@ func (s *Server) handleAuthMatch(ctx context.Context, input *NameMatchInput) (*N
 		Interface("lastName", input.Body.LastName).
 		Str("domain", input.Body.Domain).
 		Str("tickerMessageId", input.Body.TickerMessageID).
+		Str("lastNameHint", input.Body.LastNameHint).
 		Msg("auth/match request received")
 
 	query := identity.NameMatchQuery{
-		FirstName: toSTTResult(input.Body.FirstName),
-		LastName:  toSTTResult(input.Body.LastName),
-		Domains:   parseDomains(input.Body.Domain),
+		FirstName:    toSTTResult(input.Body.FirstName),
+		LastName:     toSTTResult(input.Body.LastName),
+		Domains:      parseDomains(input.Body.Domain),
+		LastNameHint: input.Body.LastNameHint,
 	}
 
 	candidates, err := s.nameMatcher.Match(ctx, query)
@@ -40,6 +42,8 @@ func (s *Server) handleAuthMatch(ctx context.Context, input *NameMatchInput) (*N
 			Name:                  c.Name,
 			FirstName:             c.FirstName,
 			LastName:              c.LastName,
+			FirstNamePhonetic:     c.FirstNamePhonetic,
+			LastNamePhonetic:      c.LastNamePhonetic,
 			ValuemationExternalID: c.ValuemationPersonXID,
 			MsgraphExternalID:     c.MsgraphPersonXID,
 			Confidence:            c.Confidence,

@@ -57,6 +57,8 @@ func (s *Server) handleAuth(ctx context.Context, input *AuthInput) (*AuthOutput,
 	resp.Body.Token = token
 	resp.Body.ExpiresIn = int(s.tokens.TTL().Seconds())
 	resp.Body.Name = id.DisplayName
+	resp.Body.Email = id.Email
+	resp.Body.ValuemationPersonID = valuemationXID
 	resp.Body.ValuemationExternalID = id.ValuemationPersonXID
 	resp.Body.MsgraphExternalID = id.MsgraphPersonXID
 

@@ -8,7 +8,6 @@ import (
 
 	"bitbucket.org/almatoag/bardioc-go/graph"
 	automation "bitbucket.org/almatoag/graph-go/NTO/Automation"
-	servicemanagement "bitbucket.org/almatoag/graph-go/NTO/ServiceManagement"
 	"bitbucket.org/almatoag/hiro-aristech-api/internal/auth"
 	"bitbucket.org/almatoag/hiro-aristech-api/internal/bardioc"
 	"bitbucket.org/almatoag/hiro-aristech-api/internal/identity"
@@ -17,9 +16,12 @@ import (
 
 const bearerPrefix = "Bearer "
 
-// TicketFinder finds tickets connected to a resolved Valuemation Person node.
+// TicketFinder finds tickets connected to a resolved Valuemation Person node,
+// or by ticket/graph ID.
 type TicketFinder interface {
-	FindForPerson(ctx context.Context, personID graph.MetadataID) ([]servicemanagement.Ticket, error)
+	FindForPerson(ctx context.Context, personID graph.MetadataID) ([]bardioc.Ticket, error)
+	FindByID(ctx context.Context, id string) (*bardioc.Ticket, error)
+	FindByIDForPerson(ctx context.Context, id string, personID graph.MetadataID) (*bardioc.Ticket, error)
 }
 
 // AccountFinder finds the Account hiro-conn-msgraph connects to a resolved
@@ -31,7 +33,7 @@ type AccountFinder interface {
 // IssueStore creates and monitors AutomationIssue nodes.
 type IssueStore interface {
 	Create(ctx context.Context, attributes map[string]string) (graph.MetadataID, error)
-	Status(ctx context.Context, id graph.MetadataID) (string, error)
+	Variables(ctx context.Context, id graph.MetadataID) (map[string]any, error)
 }
 
 // IntentFinder finds and lists Intent nodes.
@@ -134,6 +136,14 @@ func (s *Server) Register(api huma.API) {
 		Summary:     "Score candidate callers for a possibly-incomplete STT name recognition result",
 		Tags:        []string{"auth"},
 	}, s.handleAuthMatch)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-ticket-by-id",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/tickets/{id}",
+		Summary:     "Get a specific ticket by Valuemation ticket ID (e.g. IN-3084747) or graph node ID",
+		Tags:        []string{"tickets"},
+	}, s.handleTicketByID)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "list-intents",

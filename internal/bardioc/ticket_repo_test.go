@@ -5,14 +5,13 @@ import (
 	"testing"
 
 	"bitbucket.org/almatoag/bardioc-go/graph"
-	servicemanagement "bitbucket.org/almatoag/graph-go/NTO/ServiceManagement"
 	"bitbucket.org/almatoag/hiro-aristech-api/internal/mocks"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
-func ticketEntity(id, subject string) servicemanagement.Ticket {
-	t := servicemanagement.Ticket{}
+func ticketEntity(id, subject string) Ticket {
+	t := Ticket{}
 	t.Metadata = &graph.Metadata{ID: graph.MetadataID(id)}
 	t.Id = id
 	t.Subject = subject

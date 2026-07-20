@@ -92,21 +92,27 @@ func TestCreateIssue_MissingBearer_Returns401(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, resp.Code)
 }
 
-func TestIssueStatus_ReturnsCurrentStatus(t *testing.T) {
+func TestIssueStatus_ReturnsAllVariables(t *testing.T) {
 	_, humaAPI := humatest.New(t)
-	issues := &stubIssueStore{status: "PROCESSING"}
+	issues := &stubIssueStore{variables: map[string]any{
+		"ogit/status":  "PROCESSING",
+		"ogit/subject": "Drucker kaputt",
+		"/userMail":    "anrufer@example.com",
+	}}
 	server, token := newIssuesTestServer(issues, stubIntentFinder{})
 	server.Register(humaAPI)
 
 	resp := humaAPI.Get("/api/v1/issues/issue-1/status", "Authorization: Bearer "+token, "X-Api-Key: "+testAPIKey)
 
 	require.Equal(t, http.StatusOK, resp.Code)
-	require.Contains(t, resp.Body.String(), `"status":"PROCESSING"`)
+	require.Contains(t, resp.Body.String(), `"ogit/status":"PROCESSING"`)
+	require.Contains(t, resp.Body.String(), `"ogit/subject":"Drucker kaputt"`)
+	require.Contains(t, resp.Body.String(), `"/userMail":"anrufer@example.com"`)
 }
 
 func TestIssueStatus_NotFound_Returns404(t *testing.T) {
 	_, humaAPI := humatest.New(t)
-	issues := &stubIssueStore{statusErr: graph.ErrEntityNotFound}
+	issues := &stubIssueStore{variablesErr: graph.ErrEntityNotFound}
 	server, token := newIssuesTestServer(issues, stubIntentFinder{})
 	server.Register(humaAPI)
 
